@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const Waste = require('./models/Waste');
+const User = require('./models/User');
 
 const app = express();
 app.use(cors());
@@ -28,6 +29,105 @@ connectDB();
 // GET / -> "EcoTrack Backend Running"
 app.get('/', (req, res) => {
   res.send('EcoTrack Backend Running');
+});
+
+// POST /api/signup -> Save user to MongoDB
+app.post('/api/signup', async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+    
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'All fields are required' });
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+       return res.status(201).json({ message: 'User created (Mocked due to no DB connection)', data: { name, email } });
+    }
+    
+    const newUser = new User({ name, email, password });
+    await newUser.save();
+    
+    res.status(201).json({ message: 'User created successfully', data: newUser });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+// POST /api/login -> Validate user against MongoDB
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+       // Mock success if no DB
+       return res.status(200).json({ message: 'Login successful (Mocked)', user: { email, name: email.split('@')[0] } });
+    }
+
+    const user = await User.findOne({ email, password });
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    res.status(200).json({ message: 'Login successful', user: { email: user.email, name: user.name } });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to process login' });
+  }
+});
+
+// GET /api/waste -> Fetch all waste entries
+app.get('/api/waste', async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+       return res.json([
+         { _id: '1', type: 'plastic', platform: 'Amazon', createdAt: new Date().toISOString() },
+         { _id: '2', type: 'cardboard', platform: 'eBay', createdAt: new Date(Date.now() - 86400000).toISOString() },
+         { _id: '3', type: 'paper', platform: 'Walmart', createdAt: new Date(Date.now() - 172800000).toISOString() },
+         { _id: '4', type: 'plastic', platform: 'Other', createdAt: new Date(Date.now() - 604800000).toISOString() }
+       ]);
+    }
+    const wastes = await Waste.find().sort({ createdAt: -1 });
+    res.json(wastes);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch waste entries' });
+  }
+});
+
+// GET /api/trend -> Fetch waste entries grouped by day of week
+app.get('/api/trend', async (req, res) => {
+  try {
+    const defaultWeek = [
+      { name: "Mon", plastic: 0, cardboard: 0, paper: 0 },
+      { name: "Tue", plastic: 0, cardboard: 0, paper: 0 },
+      { name: "Wed", plastic: 0, cardboard: 0, paper: 0 },
+      { name: "Thu", plastic: 0, cardboard: 0, paper: 0 },
+      { name: "Fri", plastic: 0, cardboard: 0, paper: 0 },
+      { name: "Sat", plastic: 0, cardboard: 0, paper: 0 },
+      { name: "Sun", plastic: 0, cardboard: 0, paper: 0 }
+    ];
+
+    if (mongoose.connection.readyState !== 1) {
+       return res.json(defaultWeek);
+    }
+
+    const wastes = await Waste.find();
+    
+    wastes.forEach(waste => {
+      let dayIndex = new Date(waste.createdAt).getDay();
+      let mappedIndex = dayIndex === 0 ? 6 : dayIndex - 1; // Map to Mon=0...Sun=6
+
+      if (waste.type === 'plastic') defaultWeek[mappedIndex].plastic++;
+      else if (waste.type === 'cardboard') defaultWeek[mappedIndex].cardboard++;
+      else if (waste.type === 'paper') defaultWeek[mappedIndex].paper++;
+    });
+
+    res.json(defaultWeek);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch trend data' });
+  }
 });
 
 // POST /api/waste -> Save data to MongoDB

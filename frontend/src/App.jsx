@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import LogWaste from './pages/LogWaste';
 import RecyclingCenters from './pages/RecyclingCenters';
 import CenterDetails from './pages/CenterDetails';
+import Signup from './pages/Signup';
 import './index.css';
 
 // Protected Route wrapper
@@ -30,6 +31,12 @@ export default function App() {
         <Route path="/login" element={
           <div className="app-container">
             <Login />
+          </div>
+        } />
+        
+        <Route path="/signup" element={
+          <div className="app-container">
+            <Signup />
           </div>
         } />
         

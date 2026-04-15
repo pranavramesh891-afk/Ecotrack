@@ -3,34 +3,56 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 
 const API_URL = 'http://localhost:5001/api';
 
-const trendData = [
-  { name: 'Mon', plastic: 10, cardboard: 5, paper: 2 },
-  { name: 'Tue', plastic: 15, cardboard: 8, paper: 4 },
-  { name: 'Wed', plastic: 12, cardboard: 15, paper: 6 },
-  { name: 'Thu', plastic: 20, cardboard: 10, paper: 8 },
-  { name: 'Fri', plastic: 25, cardboard: 18, paper: 10 },
-  { name: 'Sat', plastic: 18, cardboard: 22, paper: 15 },
-  { name: 'Sun', plastic: 30, cardboard: 25, paper: 20 },
-];
-
 export default function Dashboard() {
   const [data, setData] = useState({ totalWaste: 0, plastic: 0, cardboard: 0, paper: 0 });
+  const [activity, setActivity] = useState([]);
+  const [trendData, setTrendData] = useState([]);
   const [loading, setLoading] = useState(true);
   
   const username = localStorage.getItem('ecoUser') || 'User';
 
   useEffect(() => {
-    fetch(`${API_URL}/dashboard`)
-      .then(res => res.json())
-      .then(json => {
-        if(json) setData(json);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error("Dashboard error:", err);
-        setLoading(false);
-      });
+    Promise.all([
+      fetch(`${API_URL}/dashboard`).then(res => res.json()),
+      fetch(`${API_URL}/waste`).then(res => res.json()),
+      fetch(`${API_URL}/trend`).then(res => res.json())
+    ])
+    .then(([dashData, wasteData, trendRes]) => {
+      if(dashData) setData(dashData);
+      if(wasteData) setActivity(wasteData);
+      if(trendRes) setTrendData(trendRes);
+      setLoading(false);
+    })
+    .catch(err => {
+      console.error("Dashboard error:", err);
+      setLoading(false);
+    });
   }, []);
+
+  // Derived Logic
+  const savedCO2 = (data.totalWaste * 0.5).toFixed(1);
+  
+  let topMaterial = 'Plastic';
+  let topEmoji = '♻️';
+  if (data.cardboard > data.plastic && data.cardboard > data.paper) {
+    topMaterial = 'Cardboard';
+    topEmoji = '📦';
+  } else if (data.paper > data.plastic && data.paper > data.cardboard) {
+    topMaterial = 'Paper';
+    topEmoji = '📄';
+  }
+
+  const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const entriesThisWeek = activity.filter(a => new Date(a.createdAt) > oneWeekAgo).length;
+
+  const formatTimeAgo = (dateStr) => {
+    if (!dateStr) return 'Unknown';
+    const timeDiff = Date.now() - new Date(dateStr).getTime();
+    const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+    if (days === 0) return 'Today';
+    if (days === 1) return 'Yesterday';
+    return `${days} days ago`;
+  };
 
   if (loading) return <div className="glass-card"><p>Loading dashboard...</p></div>;
 
@@ -101,22 +123,13 @@ export default function Dashboard() {
         <div className="glass-card" style={{ padding: '2rem' }}>
           <h3 style={{ marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>Recent Activity</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-              <span style={{ fontWeight: 500 }}>Logged 2kg plastic packaging</span>
-              <span style={{ color: 'var(--text-secondary)' }}>Today</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-              <span style={{ fontWeight: 500 }}>Visited Eco Hub Center</span>
-              <span style={{ color: 'var(--text-secondary)' }}>Yesterday</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-              <span style={{ fontWeight: 500 }}>Logged 1.5kg cardboard box</span>
-              <span style={{ color: 'var(--text-secondary)' }}>2 days ago</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-              <span style={{ fontWeight: 500 }}>Logged 0.5kg paper</span>
-              <span style={{ color: 'var(--text-secondary)' }}>Last week</span>
-            </div>
+            {activity.slice(0, 4).map(item => (
+              <div key={item._id || Math.random().toString()} style={{ display: 'flex', justifyContent: 'space-between', padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                <span style={{ fontWeight: 500, textTransform: 'capitalize' }}>Logged {item.type} from {item.platform}</span>
+                <span style={{ color: 'var(--text-secondary)' }}>{formatTimeAgo(item.createdAt)}</span>
+              </div>
+            ))}
+            {activity.length === 0 && <p style={{color: 'var(--text-secondary)'}}>No recent activity.</p>}
           </div>
         </div>
 
@@ -127,17 +140,17 @@ export default function Dashboard() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.5rem', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '12px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
               <span style={{ fontSize: '2rem' }}>🌍</span>
               <div>
-                <strong style={{ display: 'block', color: 'var(--accent-color)', fontSize: '1.1rem' }}>You saved 3kg CO₂</strong>
-                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Equal to driving 12 miles less</span>
+                <strong style={{ display: 'block', color: 'var(--accent-color)', fontSize: '1.1rem' }}>You saved {savedCO2}kg CO₂</strong>
+                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Equal to driving {Math.floor(savedCO2 * 4)} miles less</span>
               </div>
             </div>
             <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Top material:</span>
-              <strong style={{ float: 'right', color: 'var(--text-primary)' }}>Plastic ♻️</strong>
+              <strong style={{ float: 'right', color: 'var(--text-primary)' }}>{topMaterial} {topEmoji}</strong>
             </div>
             <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Total entries this week:</span>
-              <strong style={{ float: 'right', color: 'var(--text-primary)' }}>5 📈</strong>
+              <strong style={{ float: 'right', color: 'var(--text-primary)' }}>{entriesThisWeek} 📈</strong>
             </div>
           </div>
         </div>
