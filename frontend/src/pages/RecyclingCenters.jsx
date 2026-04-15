@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const API_URL = 'http://localhost:5001/api';
+const API_URL = 'https://ecotrack-lqqx.onrender.com/api';
 
 export default function RecyclingCenters() {
   const [centers, setCenters] = useState([]);

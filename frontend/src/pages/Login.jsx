@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 
-const API_URL = 'http://localhost:5001/api';
+const API_URL = 'https://ecotrack-lqqx.onrender.com/api';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -27,10 +27,12 @@ export default function Login() {
       });
       
       const data = await res.json();
+      console.log("Login Response:", data);
       
-      if (!res.ok) throw new Error(data.error || "Failed to log in");
+      if (!res.ok) throw new Error(data.error || data.message || "Failed to log in");
       
-      const username = data.user?.name || email.split('@')[0];
+      const username = data?.user?.name || email?.split('@')[0] || "User";
+      localStorage.setItem('ecoToken', data?.token || "mockToken");
       localStorage.setItem('ecoUser', username);
       navigate('/');
     } catch (err) {

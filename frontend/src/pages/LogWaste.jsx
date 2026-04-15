@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-const API_URL = 'http://localhost:5001/api';
+const API_URL = 'https://ecotrack-lqqx.onrender.com/api';
 
 export default function LogWaste() {
   const [platform, setPlatform] = useState('Amazon');
@@ -42,7 +42,10 @@ export default function LogWaste() {
 
       const wasteRes = await fetch(`${API_URL}/waste`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('ecoToken')}`
+        },
         body: JSON.stringify({ type: detectedMaterial, platform, location })
       });
       

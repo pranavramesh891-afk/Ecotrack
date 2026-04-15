@@ -10,7 +10,7 @@ import './index.css';
 
 // Protected Route wrapper
 const ProtectedRoute = ({ children }) => {
-  const isAuthenticated = !!localStorage.getItem('ecoUser');
+  const isAuthenticated = !!localStorage.getItem('ecoToken');
   return isAuthenticated ? children : <Navigate to="/login" replace />;
 };
 

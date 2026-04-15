@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-const API_URL = 'http://localhost:5001/api';
+const API_URL = 'https://ecotrack-lqqx.onrender.com/api';
 
 export default function Dashboard() {
   const [data, setData] = useState({ totalWaste: 0, plastic: 0, cardboard: 0, paper: 0 });
@@ -10,40 +10,51 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   
   const username = localStorage.getItem('ecoUser') || 'User';
+  const token = localStorage.getItem('ecoToken');
 
   useEffect(() => {
+    if(!token) {
+       setLoading(false);
+       return;
+    }
+    const headers = { 'Authorization': `Bearer ${token}` };
+
     Promise.all([
-      fetch(`${API_URL}/dashboard`).then(res => res.json()),
-      fetch(`${API_URL}/waste`).then(res => res.json()),
-      fetch(`${API_URL}/trend`).then(res => res.json())
+      fetch(`${API_URL}/dashboard`, { headers }).then(res => res.json()).catch(() => null),
+      fetch(`${API_URL}/waste`, { headers }).then(res => res.json()).catch(() => null),
+      fetch(`${API_URL}/trend`, { headers }).then(res => res.json()).catch(() => null)
     ])
     .then(([dashData, wasteData, trendRes]) => {
-      if(dashData) setData(dashData);
-      if(wasteData) setActivity(wasteData);
-      if(trendRes) setTrendData(trendRes);
+      if(dashData && dashData.totalWaste !== undefined) setData(dashData);
+      if(wasteData && Array.isArray(wasteData)) setActivity(wasteData);
+      if(trendRes && Array.isArray(trendRes)) setTrendData(trendRes);
+      
       setLoading(false);
     })
     .catch(err => {
       console.error("Dashboard error:", err);
       setLoading(false);
     });
-  }, []);
+  }, [token]);
 
-  // Derived Logic
-  const savedCO2 = (data.totalWaste * 0.5).toFixed(1);
+  // Derived Logic (Safe null-checks enforced deeply)
+  const safeTotalWaste = data?.totalWaste || 0;
+  const savedCO2 = (safeTotalWaste * 0.5).toFixed(1);
+  const treesSaved = Math.floor(savedCO2 / 10) || 0; 
   
   let topMaterial = 'Plastic';
   let topEmoji = '♻️';
-  if (data.cardboard > data.plastic && data.cardboard > data.paper) {
+  
+  if ((data?.cardboard || 0) > (data?.plastic || 0) && (data?.cardboard || 0) > (data?.paper || 0)) {
     topMaterial = 'Cardboard';
     topEmoji = '📦';
-  } else if (data.paper > data.plastic && data.paper > data.cardboard) {
+  } else if ((data?.paper || 0) > (data?.plastic || 0) && (data?.paper || 0) > (data?.cardboard || 0)) {
     topMaterial = 'Paper';
     topEmoji = '📄';
   }
 
   const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const entriesThisWeek = activity.filter(a => new Date(a.createdAt) > oneWeekAgo).length;
+  const entriesThisWeek = activity?.filter(a => new Date(a?.createdAt) > oneWeekAgo)?.length || 0;
 
   const formatTimeAgo = (dateStr) => {
     if (!dateStr) return 'Unknown';
@@ -54,10 +65,17 @@ export default function Dashboard() {
     return `${days} days ago`;
   };
 
-  if (loading) return <div className="glass-card"><p>Loading dashboard...</p></div>;
+  if (loading) {
+    return (
+      <div className="glass-card" style={{ padding: '2.5rem' }}>
+        <p>Loading your sustainability stats...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="glass-card" style={{ padding: '2.5rem' }}>
+      
       <div className="dashboard-header">
         <div>
           <h2 style={{ fontSize: '1.8rem' }}>Welcome back, <span style={{color: 'var(--accent-color)'}}>{username}</span>!</h2>
@@ -71,28 +89,28 @@ export default function Dashboard() {
             <span className="stat-icon">📊</span>
             <h3>Total Waste</h3>
           </div>
-          <div className="value">{data.totalWaste}</div>
+          <div className="value">{safeTotalWaste}</div>
         </div>
         <div className="stat-card">
           <div className="stat-header">
             <span className="stat-icon">♻️</span>
             <h3>Plastic</h3>
           </div>
-          <div className="value">{data.plastic}</div>
+          <div className="value">{data?.plastic || 0}</div>
         </div>
         <div className="stat-card">
           <div className="stat-header">
             <span className="stat-icon">📦</span>
             <h3>Cardboard</h3>
           </div>
-          <div className="value">{data.cardboard}</div>
+          <div className="value">{data?.cardboard || 0}</div>
         </div>
         <div className="stat-card">
           <div className="stat-header">
             <span className="stat-icon">📄</span>
             <h3>Paper</h3>
           </div>
-          <div className="value">{data.paper}</div>
+          <div className="value">{data?.paper || 0}</div>
         </div>
       </div>
 
@@ -119,21 +137,19 @@ export default function Dashboard() {
 
       <div style={{ marginTop: '3rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem' }}>
         
-        {/* Recent Activity */}
         <div className="glass-card" style={{ padding: '2rem' }}>
           <h3 style={{ marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>Recent Activity</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {activity.slice(0, 4).map(item => (
-              <div key={item._id || Math.random().toString()} style={{ display: 'flex', justifyContent: 'space-between', padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                <span style={{ fontWeight: 500, textTransform: 'capitalize' }}>Logged {item.type} from {item.platform}</span>
-                <span style={{ color: 'var(--text-secondary)' }}>{formatTimeAgo(item.createdAt)}</span>
+            {(activity || []).slice(0, 4).map((item, i) => (
+              <div key={item?._id || i} style={{ display: 'flex', justifyContent: 'space-between', padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                <span style={{ fontWeight: 500, textTransform: 'capitalize' }}>Logged {item?.type} from {item?.platform}</span>
+                <span style={{ color: 'var(--text-secondary)' }}>{formatTimeAgo(item?.createdAt)}</span>
               </div>
             ))}
-            {activity.length === 0 && <p style={{color: 'var(--text-secondary)'}}>No recent activity.</p>}
+            {(!activity || activity.length === 0) && <p style={{color: 'var(--text-secondary)'}}>No recent activity.</p>}
           </div>
         </div>
 
-        {/* Impact Insights */}
         <div className="glass-card" style={{ padding: '2rem' }}>
           <h3 style={{ marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>🌱 Impact Insights</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -141,7 +157,7 @@ export default function Dashboard() {
               <span style={{ fontSize: '2rem' }}>🌍</span>
               <div>
                 <strong style={{ display: 'block', color: 'var(--accent-color)', fontSize: '1.1rem' }}>You saved {savedCO2}kg CO₂</strong>
-                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Equal to driving {Math.floor(savedCO2 * 4)} miles less</span>
+                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Equal to {treesSaved} trees planted! 🌳</span>
               </div>
             </div>
             <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>

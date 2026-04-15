@@ -15,7 +15,7 @@ export default function Navbar() {
         <Link to="/" className="nav-brand">Eco<span>Track</span></Link>
         <p className="subtitle">Track packaging waste. Promote recycling.</p>
       </header>
-      
+
       <nav className="nav-container">
         <div className="nav-links">
           <Link to="/" className={`nav-link ${location.pathname === '/' ? 'active' : ''}`}>
