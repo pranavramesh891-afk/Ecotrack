@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 
-const API_URL = 'https://ecotrack-lqqx.onrender.com/api';
+const API_URL = 'http://localhost:5001/api';
 
 export default function Signup() {
   const [name, setName] = useState('');
@@ -17,7 +17,6 @@ export default function Signup() {
       setError('All fields are required');
       return;
     }
-    
     setLoading(true);
     setError(null);
     try {
@@ -26,14 +25,10 @@ export default function Signup() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password })
       });
-      
       const data = await res.json();
-      console.log("Signup Response:", data);
-      
-      if (!res.ok) throw new Error(data.error || data.message || "Failed to sign up");
-      
-      const username = data?.user?.name || name?.split(' ')[0] || "User";
-      localStorage.setItem('ecoToken', data?.token || "mockToken");
+      if (!res.ok) throw new Error(data.error || data.message || 'Failed to sign up');
+      const username = data?.user?.name || name?.split(' ')[0] || 'User';
+      localStorage.setItem('ecoToken', data?.token || 'mockToken');
       localStorage.setItem('ecoUser', username);
       navigate('/');
     } catch (err) {
@@ -44,52 +39,61 @@ export default function Signup() {
   };
 
   return (
-    <div className="glass-card login-card">
-      <div className="text-center mb-8">
-        <h1 className="nav-brand" style={{ fontSize: '2.5rem' }}>Eco<span>Track</span></h1>
-        <p className="subtitle">Create a new account</p>
+    <div className="auth-card animate-fade-up">
+      <div className="auth-logo">
+        <div className="auth-logo-icon">🌿</div>
+        <h1>Eco<span>Track</span></h1>
+        <p>Join the green movement today.</p>
       </div>
 
-      {error && <div className="status-msg status-error mb-6">{error}</div>}
+      {error && <div className="status-msg status-error mb-4">{error}</div>}
 
       <form onSubmit={handleSignup}>
         <div className="form-group">
-          <label>Name</label>
-          <input 
-            type="text" 
-            value={name} 
-            onChange={(e) => setName(e.target.value)} 
-            placeholder="John Doe" 
-            required 
+          <label htmlFor="signup-name">Full Name</label>
+          <input
+            id="signup-name"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="John Doe"
+            required
           />
         </div>
         <div className="form-group">
-          <label>Email</label>
-          <input 
-            type="email" 
-            value={email} 
-            onChange={(e) => setEmail(e.target.value)} 
-            placeholder="you@example.com" 
-            required 
+          <label htmlFor="signup-email">Email</label>
+          <input
+            id="signup-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            required
           />
         </div>
         <div className="form-group">
-          <label>Password</label>
-          <input 
-            type="password" 
-            value={password} 
-            onChange={(e) => setPassword(e.target.value)} 
-            placeholder="••••••••" 
-            required 
+          <label htmlFor="signup-password">Password</label>
+          <input
+            id="signup-password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            required
           />
         </div>
-        <button type="submit" className="primary-btn" disabled={loading}>
-          {loading ? 'Creating Account...' : 'Sign Up'}
+        <button type="submit" className="primary-btn" disabled={loading} style={{ marginTop: '8px' }}>
+          {loading ? 'Creating Account…' : 'Create Account →'}
         </button>
       </form>
-      
-      <p className="text-center" style={{ marginTop: '1.5rem', color: 'var(--text-secondary)' }}>
-        Already have an account? <Link to="/login" style={{ color: 'var(--accent-color)', textDecoration: 'none', fontWeight: 600 }}>Log in</Link>
+
+      <div className="auth-divider" />
+
+      <p className="text-center subtitle">
+        Already have an account?{' '}
+        <Link to="/login" style={{ color: 'var(--primary)', fontWeight: 700, textDecoration: 'none' }}>
+          Log in
+        </Link>
       </p>
     </div>
   );

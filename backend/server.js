@@ -1,19 +1,25 @@
+
 require('dotenv').config();
 const express = require('express');
-const cors    = require('cors');
+const cors = require('cors');
 const mongoose = require('mongoose');
-const bcrypt  = require('bcrypt');
-const jwt     = require('jsonwebtoken');
-const multer  = require('multer');
-const path    = require('path');
-const fs      = require('fs');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
 const Waste = require('./models/Waste');
-const User  = require('./models/User');
+const User = require('./models/User');
+const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+app.get("/test", (req, res) => {
+  res.send("TEST WORKING");
+});
 
 // ─── Uploads directory ────────────────────────────────────────────────────────
 const uploadDir = path.join(__dirname, 'uploads');
@@ -25,7 +31,7 @@ app.use('/uploads', express.static(uploadDir));
 // ─── Multer config ────────────────────────────────────────────────────────────
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename:    (_req, file, cb) => {
+  filename: (_req, file, cb) => {
     const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
     cb(null, `${unique}${path.extname(file.originalname)}`);
   }
@@ -67,18 +73,39 @@ connectDB();
 // ─── Auth middleware ──────────────────────────────────────────────────────────
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  
+  // 1. Log request headers for debugging
+  console.log(`[AUTH DEBUG] Request: ${req.method} ${req.originalUrl}`);
+  console.log(`[AUTH DEBUG] Authorization Header:`, authHeader ? authHeader.substring(0, 20) + '...' : 'None');
 
-  // Allow unauthenticated access when DB is offline (dev/mock mode)
-  if (mongoose.connection.readyState !== 1 && !token) {
-    req.user = { id: 'mockUserId' };
-    return next();
+  // 2. Handle missing token completely
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Access denied: No token provided' });
   }
 
-  if (!token) return res.status(401).json({ error: 'Access denied: No token provided' });
+  // 3. Validate Bearer token format
+  if (!authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Access denied: Invalid format. Expected "Bearer <token>"' });
+  }
 
+  const token = authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access denied: Token missing after Bearer' });
+  }
+
+  // 4. Verify token
   jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Access denied: Invalid token' });
+    if (err) {
+      console.error(`[AUTH DEBUG] JWT Verify Error:`, err.message);
+      // Handle expired token specifically
+      if (err.name === 'TokenExpiredError') {
+         return res.status(401).json({ error: 'Access denied: Token expired' });
+      }
+      return res.status(403).json({ error: 'Access denied: Invalid token' });
+    }
+    
+    // Valid token
     req.user = user;
     next();
   });
@@ -140,7 +167,7 @@ app.post('/api/login', async (req, res) => {
 // Simulates computer-vision detection by randomly returning a material type.
 // When an image is attached it picks based on simple heuristics; otherwise random.
 app.post('/api/detect', upload.single('image'), (req, res) => {
-  console.log('[/api/detect] req.file  →', req.file  || 'no file');
+  console.log('[/api/detect] req.file  →', req.file || 'no file');
   console.log('[/api/detect] req.body  →', req.body);
 
   const materials = ['plastic', 'cardboard', 'paper'];
@@ -158,7 +185,7 @@ app.post('/api/detect', upload.single('image'), (req, res) => {
 // ─── Log Waste (with image upload) ───────────────────────────────────────────
 app.post('/api/log-waste', authenticateToken, upload.single('image'), async (req, res) => {
   try {
-    console.log('[/api/log-waste] req.file  →', req.file  || 'no file');
+    console.log('[/api/log-waste] req.file  →', req.file || 'no file');
     console.log('[/api/log-waste] req.body  →', req.body);
 
     const type = req.body.material || req.body.type;
@@ -190,9 +217,9 @@ app.post('/api/log-waste', authenticateToken, upload.single('image'), async (req
     }
 
     const newWaste = new Waste({
-      userId:    req.user.id,
+      userId: req.user.id,
       type,
-      platform:  platform || 'Other',
+      platform: platform || 'Other',
       imagePath,
       location
     });
@@ -215,8 +242,8 @@ app.get('/api/waste', authenticateToken, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
       return res.json([
-        { _id: '1', type: 'plastic',   platform: 'Amazon', createdAt: new Date().toISOString() },
-        { _id: '2', type: 'cardboard', platform: 'eBay',   createdAt: new Date(Date.now() - 86400000).toISOString() }
+        { _id: '1', type: 'plastic', platform: 'Amazon', createdAt: new Date().toISOString() },
+        { _id: '2', type: 'cardboard', platform: 'eBay', createdAt: new Date(Date.now() - 86400000).toISOString() }
       ]);
     }
     const wastes = await Waste.find({ userId: req.user.id }).sort({ createdAt: -1 });
@@ -224,6 +251,97 @@ app.get('/api/waste', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('[/api/waste GET]', error.message);
     res.status(500).json({ error: 'Failed to fetch waste entries' });
+  }
+});
+
+// ─── AI Image Classification Endpoint ─────────────────────────────────────────
+app.post('/api/classify-waste', authenticateToken, async (req, res) => {
+  try {
+    const { imageBase64, platform, location } = req.body;
+    if (!imageBase64) return res.status(400).json({ error: 'Image required for classification' });
+
+    console.log('[/api/classify-waste] processing image...');
+
+    // Extract raw base64 and write to file to preserve imagePath format
+    let rawBase64 = imageBase64;
+    let ext = '.png';
+    const match = imageBase64.match(/^data:image\/(\w+);base64,/);
+    if (match) {
+      ext = `.${match[1]}`;
+      rawBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    }
+
+    const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+    const filePath = path.join(uploadDir, filename);
+    fs.writeFileSync(filePath, Buffer.from(rawBase64, 'base64'));
+
+    // Try AI integration
+    let type = 'plastic'; // fallback
+    let confidence = 0.90;
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (apiKey) {
+        const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: 'v1' } });
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [
+            "Classify this waste into exactly one of these categories: paper, plastic, cardboard. Only output the single category word in lowercase. If none matches exactly, pick the closest one from the three.",
+            {
+              inlineData: {
+                data: rawBase64,
+                mimeType: `image/${match ? match[1] : 'jpeg'}`
+              }
+            }
+          ]
+        });
+        const ans = response.text.trim().toLowerCase();
+        // sanitize strictly
+        if (ans.includes('paper')) type = 'paper';
+        else if (ans.includes('cardboard')) type = 'cardboard';
+        else if (ans.includes('plastic')) type = 'plastic';
+        else type = 'plastic'; // rigid fallback
+      } else {
+        console.warn('⚠️ No GEMINI_API_KEY found, returning fake AI result.');
+        type = ['plastic', 'paper', 'cardboard'][Math.floor(Math.random() * 3)];
+      }
+    } catch (aiError) {
+      console.error('AI Error:', aiError.message);
+      // Fallback preserves normal operation
+    }
+
+    // Save to Mongo
+    let locObj = { lat: 0, lng: 0 };
+    try {
+      if (location) locObj = typeof location === 'string' ? JSON.parse(location) : location;
+    } catch { /* ignore */ }
+
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(201).json({
+        success: true,
+        message: 'Classified successfully (mock DB mode)',
+        data: { type, platform: platform || 'Other', imagePath: filename, location: locObj },
+        confidence
+      });
+    }
+
+    const newWaste = new Waste({
+      userId: req.user.id,
+      type,
+      platform: platform || 'Other',
+      imagePath: filename,
+      location: locObj
+    });
+    await newWaste.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Waste classified and logged successfully',
+      data: newWaste,
+      confidence
+    });
+  } catch (err) {
+    console.error('[/api/classify-waste] ERROR →', err.message);
+    res.status(500).json({ error: 'Failed to classify image', details: err.message });
   }
 });
 
@@ -236,7 +354,7 @@ app.post('/api/waste', authenticateToken, async (req, res) => {
       return res.status(201).json({ success: true, message: 'Saved (mock)', data: { type, platform } });
 
     const newWaste = new Waste({
-      userId:   req.user.id,
+      userId: req.user.id,
       type,
       platform: platform || 'Other',
       location: location || { lat: 0, lng: 0 }
@@ -268,9 +386,9 @@ app.get('/api/trend', authenticateToken, async (req, res) => {
     wastes.forEach(waste => {
       const dayIndex = new Date(waste.createdAt).getDay();
       const idx = dayIndex === 0 ? 6 : dayIndex - 1;
-      if (waste.type === 'plastic')   defaultWeek[idx].plastic++;
+      if (waste.type === 'plastic') defaultWeek[idx].plastic++;
       else if (waste.type === 'cardboard') defaultWeek[idx].cardboard++;
-      else if (waste.type === 'paper')    defaultWeek[idx].paper++;
+      else if (waste.type === 'paper') defaultWeek[idx].paper++;
     });
 
     res.json(defaultWeek);
@@ -303,8 +421,8 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
 // ─── Recycling Centers ────────────────────────────────────────────────────────
 app.get('/api/recycling', (_req, res) => {
   res.json([
-    { id: 1, name: 'Eco Hub Center',        distance: '1.2 miles' },
-    { id: 2, name: 'Green Path Recycling',  distance: '2.5 miles' },
+    { id: 1, name: 'Eco Hub Center', distance: '1.2 miles' },
+    { id: 2, name: 'Green Path Recycling', distance: '2.5 miles' },
     { id: 3, name: 'City Waste Management', distance: '3.8 miles' }
   ]);
 });

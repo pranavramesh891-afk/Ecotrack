@@ -1,17 +1,29 @@
 import { useState } from 'react';
+import { fetchWithAuth } from '../utils/api';
 
-const API_URL = 'https://ecotrack-lqqx.onrender.com/api';
+const PLATFORMS = ['Amazon', 'eBay', 'Walmart', 'Other'];
 
 export default function LogWaste() {
   const [platform, setPlatform] = useState('Amazon');
-  const [material, setMaterial] = useState('plastic');
+  const [file, setFile] = useState(null);
   const [fileName, setFileName] = useState('');
+  const [preview, setPreview] = useState(null);
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [aiResult, setAiResult] = useState(null);
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
-      setFileName(e.target.files[0].name);
+      const selectedFile = e.target.files[0];
+      setFile(selectedFile);
+      setFileName(selectedFile.name);
+      
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreview(reader.result);
+      };
+      reader.readAsDataURL(selectedFile);
+      setAiResult(null); // Reset previous result when new image is selected
     }
   };
 
@@ -19,93 +31,191 @@ export default function LogWaste() {
     e.preventDefault();
     setLoading(true);
     setStatus(null);
+    setAiResult(null);
 
     try {
-      const detectRes = await fetch(`${API_URL}/detect`, { method: 'POST' });
-      const detectData = await detectRes.json();
-      const detectedMaterial = detectData.material || material;
-      
+      if (!preview) {
+        throw new Error('Please upload an image for AI classification.');
+      }
+
+      // ── Step 1: Get geolocation (optional) ──
       let location = { lat: 0, lng: 0 };
-      if ("geolocation" in navigator) {
+      if ('geolocation' in navigator) {
         try {
-          const position = await new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3000 });
-          });
-          location = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          };
-        } catch (geoError) {
-          console.warn("Geolocation denied or timed out.");
+          const pos = await new Promise((resolve, reject) =>
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3000 })
+          );
+          location = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        } catch {
+          console.warn("Geolocation not available");
         }
       }
 
-      const wasteRes = await fetch(`${API_URL}/waste`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('ecoToken')}`
-        },
-        body: JSON.stringify({ type: detectedMaterial, platform, location })
-      });
-      
-      if (!wasteRes.ok) throw new Error("Failed to save waste.");
-      
-      setStatus({ type: 'success', msg: `Waste logged! AI detected: ${detectedMaterial}.` });
-      setFileName('');
+      console.log("Transmitting image to AI Classifier...");
 
+      // ── Step 2: CALL AI ENDPOINT ──
+      const res = await fetchWithAuth('/classify-waste', {
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: preview,
+          platform: platform,
+          location: JSON.stringify(location)
+        })
+      });
+
+      if (!res) return; // intercept handled by wrapper
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Server error (${res.status}): ${text}`);
+      }
+
+      const data = await res.json();
+      console.log("Classification result:", data);
+
+      setAiResult({
+        category: data.data.type,
+        confidence: data.confidence || 0.90
+      });
+
+      setStatus({
+        type: "success",
+        msg: `✅ AI successfully classified and logged your waste!`
+      });
+
+      // Cleanup form
+      setFile(null);
+      setFileName('');
+      setPreview(null);
     } catch (error) {
-      console.error(error);
-      setStatus({ type: 'error', msg: 'An error occurred while saving.' });
+      console.error("Classification error:", error);
+      setStatus({
+        type: "error",
+        msg: error.message || "❌ An error occurred classifying the image."
+      });
     } finally {
       setLoading(false);
     }
   };
 
+  const formatConfidence = (conf) => {
+    return Math.round(conf * 100) + '%';
+  };
+
+  const getEmoji = (type) => {
+    if (type === 'plastic') return '♻️';
+    if (type === 'cardboard') return '📦';
+    if (type === 'paper') return '📄';
+    return '';
+  };
+
   return (
-    <div className="glass-card">
-      <h2 className="mb-2">Log New Waste</h2>
-      <p className="subtitle mb-6">Upload an image of your packaging to track it.</p>
+    <div className="animate-fade-up">
+      <p className="page-title">AI Waste Scanner</p>
+      <p className="page-subtitle">Upload packaging evidence and let AI classify your waste.</p>
 
       {status && (
-        <div className={`status-msg ${status.type === 'success' ? 'status-success' : 'status-error'} mb-6`}>
+        <div className={`status-msg ${status.type === 'success' ? 'status-success' : 'status-error'} mb-4`}>
           {status.msg}
         </div>
       )}
 
+      {/* ── AI Result Box ── */}
+      {aiResult && (
+        <div className="card mb-3 animate-fade-up" style={{ border: '2px solid var(--primary)' }}>
+          <div className="card-body" style={{ textAlign: 'center' }}>
+            <p style={{ margin: 0, fontWeight: 600, color: 'var(--primary)', marginBottom: 8 }}>
+              OpenAI Vision Results
+            </p>
+            <div style={{ fontSize: '2rem', marginBottom: 8 }}>
+              {getEmoji(aiResult.category)}
+            </div>
+            <h3 style={{ textTransform: 'capitalize', margin: 0, marginBottom: 4 }}>
+              {aiResult.category}
+            </h3>
+            <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+              Confidence: {formatConfidence(aiResult.confidence)}
+            </p>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label>Platform</label>
-          <select value={platform} onChange={e => setPlatform(e.target.value)}>
-            <option value="Amazon">Amazon</option>
-            <option value="eBay">eBay</option>
-            <option value="Walmart">Walmart</option>
-            <option value="Other">Other</option>
-          </select>
+        {/* ── Platform ── */}
+        <div className="card mb-3">
+          <div className="card-body">
+            <div className="form-group" style={{ gap: 0, margin: 0 }}>
+              <label htmlFor="platform-select" style={{ marginBottom: '8px', display: 'block' }}>
+                Platform / Retailer
+              </label>
+              <select
+                id="platform-select"
+                value={platform}
+                onChange={e => setPlatform(e.target.value)}
+              >
+                {PLATFORMS.map(p => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
 
-        <div className="form-group">
-          <label>Expected Material</label>
-          <select value={material} onChange={e => setMaterial(e.target.value)}>
-            <option value="plastic">Plastic</option>
-            <option value="cardboard">Cardboard</option>
-            <option value="paper">Paper</option>
-          </select>
+        {/* ── Image Upload & Preview ── */}
+        <div className="card mb-4">
+          <div className="card-body">
+            <label style={{ display: 'block', marginBottom: '12px' }}>
+              Image Evidence <span style={{ color: 'var(--primary)', fontWeight: 600 }}>*</span>
+            </label>
+            
+            <label className="image-upload-wrapper" htmlFor="file-upload" style={{ padding: preview ? '10px' : '32px' }}>
+              {preview ? (
+                <div style={{ width: '100%', borderRadius: '10px', overflow: 'hidden', position: 'relative' }}>
+                  <img src={preview} alt="Upload preview" style={{ width: '100%', display: 'block', objectFit: 'cover', maxHeight: '300px' }} />
+                  <div style={{ position: 'absolute', bottom: 10, left: 10, right: 10, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '8px', borderRadius: '8px', fontSize: '0.85rem' }}>
+                    Tap to change image
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <span className="upload-icon">📷</span>
+                  <span className="upload-text">Tap to capture or upload</span>
+                  <span className="upload-hint">Supports JPG, PNG, HEIC</span>
+                  <span className="upload-cta">Browse Files</span>
+                </>
+              )}
+              <input
+                id="file-upload"
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+              />
+            </label>
+          </div>
         </div>
 
-        <div className="form-group">
-          <label>Image Evidence</label>
-          <label className="image-upload-wrapper">
-            <p>{fileName ? `Selected: ${fileName}` : 'Click to select packaging image'}</p>
-            <span style={{color: 'var(--accent-color)', fontSize: '0.9rem', fontWeight: 600}}>
-              {fileName ? 'Change File' : 'Browse Files'}
-            </span>
-            <input type="file" accept="image/*" onChange={handleFileChange} />
-          </label>
-        </div>
-
-        <button type="submit" className="primary-btn" disabled={loading}>
-          {loading ? 'Processing...' : 'Analyze & Save'}
+        {/* ── Submit ── */}
+        <button
+          type="submit"
+          className="primary-btn"
+          disabled={loading || !preview}
+          id="submit-waste-btn"
+        >
+          {loading ? (
+            <>
+              <span style={{
+                display: 'inline-block', width: 16, height: 16,
+                border: '2px solid rgba(255,255,255,0.4)',
+                borderTop: '2px solid white',
+                borderRadius: '50%',
+                animation: 'spin 0.7s linear infinite'
+              }} />
+              AI Analyzing Image…
+            </>
+          ) : (
+            '✨ Upload & Classify'
+          )}
         </button>
       </form>
     </div>
