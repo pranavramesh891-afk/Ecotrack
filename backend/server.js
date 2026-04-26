@@ -298,7 +298,7 @@ Output Format: Return the result strictly as a pure JSON object without markdown
         `.trim();
 
         const response = await ai.models.generateContent({
-          model: 'gemini-3.1-flash',
+          model: 'gemini-3.1-flash-lite-preview',
           contents: [
             prompt,
             {
